@@ -48,6 +48,50 @@ test('a worker gets the step line in its brief and shows its steps', async ($, o
   await ui.unmount()
 })
 
+test('any working agent gets the step line; quick lookup agents do not', async ($, on) => {
+  engine(on)
+  const prompts: Record<string, string> = {}
+  on('agent.spawn', (_, e) => {
+    prompts[e.subagentType] = e.prompt
+    return { model: 'claude-opus-5-5', agentId: e.subagentType }
+  })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.agent.spawn({ prompt: 'Build it', description: 'Build API', subagentType: 'general-purpose' } as never)
+  await $.agent.spawn({ prompt: 'Find it', description: 'Find files', subagentType: 'Explore' } as never)
+  expect(prompts['general-purpose']).toContain('mcp__team-progress__step')
+  expect(prompts.Explore).toBe('Find it')
+})
+
+test('the lead learns when to report from the system prompt', async ($, on) => {
+  engine(on)
+  on('prompt.compose', () => ({ sections: [{ id: 'intro', text: 'You are Claude.', scope: 'shared' }] }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  const { sections } = await $.prompt.compose({
+    model: 'claude-opus-5-5',
+    promptModel: 'claude-opus-5-5',
+    surfaces: ['desktop'],
+    tools: [],
+    outputStyle: null,
+    traits: [],
+  } as never)
+  const guide = sections.find(s => s.id === 'team-progress:guide')
+  expect(guide?.scope).toBe('session')
+  expect(guide?.text).toContain('mcp__team-progress__progress')
+})
+
+test('a planned task can name any agent type', async ($, on) => {
+  engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.tool.call({
+    tool: 'mcp__team-progress__progress',
+    title: 'Ship it',
+    tasks: [{ title: 'Write docs', role: 'my-plugin:docs-writer' }],
+  } as never)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' } as never)
+  expect((await ui.find({ type: 'Text', text: /Write docs/ }))?.text).toContain('docs-writer')
+  await ui.unmount()
+})
+
 test('the band shows the lead task, tier and phase on every surface', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })

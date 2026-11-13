@@ -55,7 +55,18 @@ const ROLE_COLORS: Record<string, string> = {
   other: '#888780',
 }
 
-const WORKER_ROLES = ['engineer', 'senior-engineer', 'qa-checker', 'fork']
+// Built-in lookup agents that answer in one pass: no step line in their brief.
+const QUICK_TYPES = ['Explore', 'Plan', 'claude-code-guide', 'statusline-setup']
+
+// Added to the lead's system prompt so the mod works with no setup of its own.
+const LEAD_GUIDE = [
+  '# Progress band (team-progress mod)',
+  `For a multi-step task (one you plan in steps or delegate to subagents), report it with ${PROGRESS_TOOL} (load it with ToolSearch if it is deferred). Skip questions and quick one-step work.`,
+  '- When you start: title (a few words), phase "triage", and tier (trivial, standard, hard or very-hard) if you size tasks that way.',
+  '- Once planned: tasks, each with a role (the subagent type that will do it, or "lead" for your own work); a delegated task\'s title must equal the Agent description you spawn it with. Set phase "build".',
+  '- On each phase change (review, qa, commit), each time a task is finished (done), and once at the end with finished: true.',
+  '- Always send the call in the same message as another tool call, never in a message of its own: a call alone costs a whole extra turn. With nothing else to send, fold the update into the next one.',
+].join('\n')
 const TIERS: Tier[] = ['trivial', 'standard', 'hard', 'very-hard']
 const TIER_WORDS: Record<Tier, string> = {
   trivial: 'Trivial',
@@ -243,7 +254,7 @@ function readTasks(raw: unknown): PlannedTask[] | undefined {
     const entry = (item ?? {}) as Input
     const title = typeof entry.title === 'string' ? clip(entry.title, 80) : ''
     if (title === '') continue
-    const role = typeof entry.role === 'string' && isRole(entry.role) ? entry.role : 'other'
+    const role = typeof entry.role === 'string' && entry.role.trim() !== '' ? clip(roleOfType(entry.role), 40) : 'other'
     tasks.push({ title, role })
   }
   return tasks
@@ -313,7 +324,7 @@ export const register: Register = on => {
                 title: { type: 'string' },
                 role: {
                   type: 'string',
-                  enum: ['lead', 'engineer', 'senior-engineer', 'code-reviewer', 'qa-checker', 'design-advisor', 'Explore', 'fork'],
+                  description: 'The subagent type that will do it (e.g. general-purpose, engineer), or "lead" for your own work',
                 },
               },
               required: ['title', 'role'],
@@ -361,6 +372,14 @@ export const register: Register = on => {
     return started
   })
 
+  // Teach the lead when to report, so nobody has to edit their CLAUDE.md.
+  on('prompt.compose', async ($, e, next) => {
+    const composed = await next(e)
+    const skip = e.traits.some(t => t === 'bare' || t === 'teammate' || t === 'analysis')
+    if (skip) return composed
+    return { ...composed, sections: [...composed.sections, { id: 'team-progress:guide', text: LEAD_GUIDE, scope: 'session' }] }
+  })
+
   on('command.run', { command: 'team' }, async ($, e) => {
     const isOpen = await togglePane($, e.args.trim() === 'open')
     return { text: isOpen ? 'Team panel opened.' : 'Team panel closed.' }
@@ -385,7 +404,7 @@ export const register: Register = on => {
     }
 
     return { result: `ok: ${next.title} · ${flowLabel(next)}` }
-  })
+  }).catch(() => ({ result: 'ignored: the progress band could not record this update' }))
 
   on('tool.call', { tool: STEP_TOOL }, async ($, e) => {
     if (!e.agentId) return { result: 'ignored: only subagents report steps' }
@@ -406,11 +425,12 @@ export const register: Register = on => {
     })
 
     return { result: 'ok' }
-  })
+  }).catch(() => ({ result: 'ignored: the team panel could not record this step' }))
 
   on('agent.spawn', async ($, e, next) => {
     const type = roleOfType(e.subagentType)
-    const wantsSteps = WORKER_ROLES.includes(type) && !e.prompt.includes(STEP_TOOL)
+    const isQuick = QUICK_TYPES.includes(type)
+    const wantsSteps = !isQuick && !e.prompt.includes(STEP_TOOL)
     const spawned = await next(wantsSteps ? { ...e, prompt: e.prompt + STEP_NOTE } : e)
 
     try {
@@ -426,7 +446,7 @@ export const register: Register = on => {
         const at = await $.clock.now()
         await update($, nowAtom, () => at)
 
-        if (type !== 'Explore' && isRole(type)) {
+        if (!isQuick) {
           const flow = await read($, flowAtom)
           await openOncePerFlow($, flow?.title ?? '(no task)')
         }
@@ -436,7 +456,7 @@ export const register: Register = on => {
     }
 
     return spawned
-  })
+  }).catch(($, e, next) => next(e))
 
   on('turn.step', async function* ($, e, next) {
     const result = yield* next(e)
@@ -562,7 +582,7 @@ export const register: Register = on => {
     const columns = e.props.bodyColumns
 
     const agentRow = (run: AgentRun) => {
-      const roleColor = colorOf(run.type)
+      const roleColor = colorOf(roleOfType(run.type))
       const glyph = run.status === 'running' ? '●' : run.status === 'done' ? '✓' : '✗'
       const glyphColor = run.status === 'running' ? roleColor : run.status === 'done' ? GOOD : BAD
       const width = Math.max(8, Math.min(16, Math.round(columns / 4)))
