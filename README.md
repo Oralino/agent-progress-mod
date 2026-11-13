@@ -20,7 +20,7 @@ config files to edit.
   starts. The panel opens by itself once per task, when work is first delegated.
 
 Works with any agents: the built-in `general-purpose` agent, your own agents in `~/.claude/agents/`, or
-a plugin's. Quick lookup agents (`Explore`, `Plan`) are tracked but not asked to report steps.
+a plugin's. Each agent type gets its own color automatically, the same one every time. Quick lookup agents (`Explore`, `Plan`) are tracked but not asked to report steps.
 
 ## Install
 

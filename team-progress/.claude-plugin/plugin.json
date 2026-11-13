@@ -1,6 +1,6 @@
 {
   "name": "team-progress",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Progress band above the prompt for the lead's task (tier, phase, tasks done) plus a /team panel of subagents: role, model, steps, tokens, cost and time.",
   "license": "MIT",
   "types": "./types/index.d.ts"

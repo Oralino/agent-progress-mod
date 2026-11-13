@@ -91,7 +91,23 @@ const STEP_NOTE =
   'same message as your next other tool call, never on its own. If the tool is not available, skip this.'
 
 const isRole = (role: string) => Object.prototype.hasOwnProperty.call(ROLE_COLORS, role) && role !== 'other'
-const colorOf = (role: string) => ROLE_COLORS[isRole(role) ? role : 'other'] ?? '#888780'
+// Any other agent type gets a stable color of its own, picked by its name.
+const PALETTE = ['#3A86FF', '#E07A5F', '#2A9D8F', '#C77DFF', '#E9A23B', '#43AA8B', '#F15BB5', '#5E81AC', '#D4A017', '#EF476F']
+
+function hashOf(text: string): number {
+  let h = 2166136261
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
+export function colorOf(role: string): string {
+  if (isRole(role)) return ROLE_COLORS[role] ?? '#888780'
+  if (role === '' || role === 'other') return ROLE_COLORS.other ?? '#888780'
+  return PALETTE[hashOf(role) % PALETTE.length] ?? '#888780'
+}
 const roleOfType = (type: string) => type.slice(type.lastIndexOf(':') + 1)
 
 // ------------------------------------------------------------------- numbers

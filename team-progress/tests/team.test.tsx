@@ -1,6 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
+import { colorOf } from '../hooks/register'
+
 const BAND = {
   plugin: 'team-progress',
   component: 'AbovePrompt',
@@ -90,6 +92,14 @@ test('a planned task can name any agent type', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' } as never)
   expect((await ui.find({ type: 'Text', text: /Write docs/ }))?.text).toContain('docs-writer')
   await ui.unmount()
+})
+
+test('every agent type gets a stable color, and known roles keep theirs', () => {
+  expect(colorOf('engineer')).toBe('#378ADD')
+  expect(colorOf('general-purpose')).toBe(colorOf('general-purpose'))
+  expect(colorOf('general-purpose')).not.toBe('#888780')
+  expect(colorOf('docs-writer')).not.toBe('#888780')
+  expect(colorOf('other')).toBe('#888780')
 })
 
 test('the band shows the lead task, tier and phase on every surface', async ($, on) => {
