@@ -8,7 +8,9 @@ config files to edit.
 
 - **A progress band above the prompt** shows the lead's current task: its tier if it sizes tasks
   (Trivial, Standard, Hard, Very hard), its phase (Triage, Plan, Build, Review, QA, Commit), a progress bar, and tasks done
-  out of planned during Build and Review. ✕ dismisses it.
+  out of planned during Build and Review. ✕ dismisses it. It shows for any real task, whether or not
+  subagents are used; if the session forgets to report, the band starts by itself after a few tool
+  calls, titled from your message.
 
 | While agents run | When they finish |
 |---|---|

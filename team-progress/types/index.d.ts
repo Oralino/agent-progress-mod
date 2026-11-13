@@ -15,6 +15,8 @@ export type Flow = {
   done: number
   isFinished: boolean
   tasks: PlannedTask[]
+  /** Started by the mod itself because the lead had not reported; finished when the turn ends. */
+  isAuto?: boolean
 }
 
 export type AgentStatus = 'running' | 'done' | 'failed'

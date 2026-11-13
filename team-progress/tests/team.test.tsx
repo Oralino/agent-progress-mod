@@ -132,6 +132,44 @@ test('a color given in an earlier session comes back and new ones are saved', as
   expect(map['test-runner']).not.toBe('#123456')
 })
 
+test('the band starts by itself when the lead works without reporting', async ($, on) => {
+  engine(on)
+  on('prompt.submit', (_, e) => ({ text: e.text }))
+  on('tool.call', () => ({ result: 'done' }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.prompt.submit({ text: 'Fix the broken login page on mobile please' } as never)
+
+  await $.tool.call({ tool: 'Read', file_path: 'a.ts' } as never)
+  await $.tool.call({ tool: 'Edit', file_path: 'a.ts' } as never)
+  const quiet = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect(await quiet.find({ type: 'Text', text: /Fix the broken/ })).toBe(undefined)
+  await quiet.unmount()
+
+  await $.tool.call({ tool: 'Bash', command: 'npm test' } as never)
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect((await ui.find({ type: 'Text', text: /Fix the broken/ }))?.text).toBe('Fix the broken login page on')
+  await ui.unmount()
+
+  // The lead's own report replaces the automatic band.
+  await $.tool.call({ tool: 'mcp__team-progress__progress', title: 'Login fix', phase: 'build' } as never)
+  const replaced = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect((await replaced.find({ type: 'Text', text: /Login fix/ }))?.text).toBe('Login fix')
+  await replaced.unmount()
+})
+
+test('no automatic band once the lead has reported this turn', async ($, on) => {
+  engine(on)
+  on('prompt.submit', (_, e) => ({ text: e.text }))
+  on('tool.call', () => ({ result: 'done' }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.prompt.submit({ text: 'Refactor the parser' } as never)
+  await $.tool.call({ tool: 'mcp__team-progress__progress', title: 'Parser refactor', phase: 'build', finished: true } as never)
+  for (const tool of ['Read', 'Edit', 'Bash']) await $.tool.call({ tool } as never)
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect(await ui.find({ type: 'Text', text: /Refactor the parser/ })).toBe(undefined)
+  await ui.unmount()
+})
+
 test('the band shows the lead task, tier and phase on every surface', async ($, on) => {
   engine(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })

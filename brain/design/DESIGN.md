@@ -22,6 +22,8 @@ One row, left to right:
 
 Accent `#8f8cf4`; `#5fbf8f` once finished. Other mods' bands draw below this one.
 
+An automatic band (the lead did not report) uses the first six words of the person's message as its title, shows `Build` at 0%, and turns to `Done` when the turn ends.
+
 ## Team panel
 
 - Bold header `title · Tier · label` while a task is active.

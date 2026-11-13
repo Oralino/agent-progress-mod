@@ -27,11 +27,13 @@ docs/                             README screenshots
 |---|---|
 | `session.start` | registers the `progress` and `step` tools and the `/team` command; loads saved colors from `$.store`; starts a 1s clock while agents run |
 | `prompt.compose` | appends the `team-progress:guide` section (session scope) to the main session's system prompt, telling the lead when to call `progress`; skipped for `bare`, `teammate` and `analysis` renders |
-| `tool.call` `mcp__team-progress__progress` | lead only (a call with `agentId` is ignored); merges into the flow; a new title or a finished flow starts fresh and drops finished runs; assigns colors to task roles |
+| `prompt.submit` | starts the turn count for the safety net and keeps the message for an automatic title |
+| `tool.call` (any) | counts the main session's tool calls in a turn (not `progress`, `step` or `ToolSearch`); at the 3rd with no report and no active task, starts an automatic band (`isAuto`) titled from the first words of the message |
+| `tool.call` `mcp__team-progress__progress` | not deferred, so always in the lead's tool list; lead only (a call with `agentId` is ignored); merges into the flow; a new title or a finished flow starts fresh and drops finished runs; assigns colors to task roles |
 | `tool.call` `mcp__team-progress__step` | subagents only; updates that run's step counts and note |
 | `agent.spawn` | appends the step request to every brief except quick lookup types (`Explore`, `Plan`, `claude-code-guide`, `statusline-setup`); records the run; assigns its color; opens the panel once per task |
 | `turn.step` | per model request: a subagent's tokens, context and cost, or the lead's own |
-| `turn.complete` | marks a subagent done or failed |
+| `turn.complete` | marks a subagent done or failed; for the main session, resets the turn count and finishes an automatic band |
 | `ui.render` `AbovePrompt` | the band |
 | `ui.render` `Pane` `team-progress` | the panel |
 
@@ -55,7 +57,8 @@ Cost is estimated per request from a price table (USD per million tokens: input,
 ## Known limits
 
 - Agents with a `tools:` list in their frontmatter need `mcp__team-progress__step` added to report steps; a mod can't add tools to an agent.
-- The lead only reports if it follows the system prompt guide; nothing forces it.
+- The lead only reports if it follows the system prompt guide. When it doesn't, the automatic band shows only a title and Build → Done, with no plan or count.
+- The automatic band also appears for read-heavy turns of 3+ tool calls (e.g. answering a question by reading files).
 - Colors are unique by value, but generated colors past the palette can look alike.
 - A subagent whose usage arrives before its spawn returns shows briefly as a grey "Subagent" row.
 - Costs are estimates, not billing data.

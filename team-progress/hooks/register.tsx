@@ -84,9 +84,9 @@ const QUICK_TYPES = ['Explore', 'Plan', 'claude-code-guide', 'statusline-setup']
 // Added to the lead's system prompt so the mod works with no setup of its own.
 const LEAD_GUIDE = [
   '# Progress band (team-progress mod)',
-  `For a multi-step task (one you plan in steps or delegate to subagents), report it with ${PROGRESS_TOOL} (load it with ToolSearch if it is deferred). Skip questions and quick one-step work.`,
-  '- When you start: title (a few words), phase "triage", and tier (trivial, standard, hard or very-hard) if you size tasks that way.',
-  '- Once planned: tasks, each with a role (the subagent type that will do it, or "lead" for your own work); a delegated task\'s title must equal the Agent description you spawn it with. Set phase "build".',
+  `The person sees a progress band above the prompt only while you report your task with ${PROGRESS_TOOL}. Report every task that edits files or takes more than a couple of tool calls, whether or not you use subagents; skip only questions and quick reads. A task you do yourself counts.`,
+  '- Send the first call with the first tool call of the task: title (a few words), phase "triage" (or "build" if there is nothing to plan), and tier (trivial, standard, hard or very-hard) if you size tasks that way.',
+  '- Once planned: tasks, each with a role (the subagent type that will do it, or "lead" for your own work); a delegated task\'s title must equal the Agent description you spawn it with. Set phase "build". Without a plan, report done/total against the steps you intend.',
   '- On each phase change (review, qa, commit), each time a task is finished (done), and once at the end with finished: true.',
   '- Always send the call in the same message as another tool call, never in a message of its own: a call alone costs a whole extra turn. With nothing else to send, fold the update into the next one.',
 ].join('\n')
@@ -318,7 +318,8 @@ function readTasks(raw: unknown): PlannedTask[] | undefined {
 
 function mergeFlow(previous: Flow | null, input: Input): Flow {
   const title = typeof input.title === 'string' && input.title.trim() !== '' ? clip(input.title, 80) : undefined
-  const isFresh = !previous || previous.isFinished || (title !== undefined && title !== previous.title)
+  const isFresh =
+    !previous || previous.isFinished || previous.isAuto === true || (title !== undefined && title !== previous.title)
   const base: Flow =
     isFresh || !previous
       ? { title: title ?? previous?.title ?? 'Task', tier: '', phase: 'triage', total: 0, done: 0, isFinished: false, tasks: [] }
@@ -347,6 +348,24 @@ function mergeFlow(previous: Flow | null, input: Input): Flow {
   }
 }
 
+// ---------------------------------------------------------------- auto start
+
+const AUTO_AFTER_CALLS = 3
+// Calls that are bookkeeping, not work.
+const IGNORED_FOR_AUTO = [PROGRESS_TOOL, STEP_TOOL, 'ToolSearch']
+
+// What the current turn of the main session has done. Module scope is fine: a
+// reload mid-turn only delays the safety net to the next turn.
+const turn = { calls: 0, isReported: false, prompt: '' }
+
+/** A band titled from the person's message, for a task the lead did not report. */
+export function autoFlow(prompt: string): Flow {
+  const firstLine = prompt.split('\n').find(line => line.trim() !== '') ?? ''
+  const words = firstLine.trim().split(/\s+/).slice(0, 6).join(' ')
+  const title = words === '' ? 'Working' : clip(words, 60)
+  return { title, tier: '', phase: 'build', total: 0, done: 0, isFinished: false, tasks: [], isAuto: true }
+}
+
 // ------------------------------------------------------------------ register
 
 export const register: Register = on => {
@@ -359,9 +378,12 @@ export const register: Register = on => {
         'Report the lead\'s current task so the person sees a progress band above the prompt. Call it once you have triaged ' +
         'a task (title, tier, phase, the planned tasks with the role that will do each), again when the phase changes or ' +
         'tasks finish (done), and with finished: true when everything is complete. Omitted fields keep their value; a new ' +
-        'title starts a fresh task. Only the lead may call it. ' +
+        'title starts a fresh task. Only the lead may call it. Use it for any task that edits files or takes more than ' +
+        'a couple of tool calls, with or without subagents. ' +
         'Always send it in the same message as another tool call (in parallel), never in a message of its own: ' +
         'a call alone costs a whole extra turn.',
+      // Kept in the tool list, not behind ToolSearch: a deferred tool was too easy to skip.
+      isDeferred: false,
       inputSchema: {
         type: 'object',
         properties: {
@@ -444,6 +466,33 @@ export const register: Register = on => {
     return { ...composed, sections: [...composed.sections, { id: 'team-progress:guide', text: LEAD_GUIDE, scope: 'session' }] }
   })
 
+  // Safety net: if the lead works through several tool calls in a turn without
+  // reporting, and no task is active, the band starts by itself.
+  on('prompt.submit', ($, e, next) => {
+    turn.calls = 0
+    turn.isReported = false
+    turn.prompt = typeof e.text === 'string' ? e.text : ''
+    return next(e)
+  })
+
+  on('tool.call', async ($, e, next) => {
+    if (!e.agentId && !IGNORED_FOR_AUTO.includes(e.tool)) {
+      turn.calls += 1
+      if (turn.calls === AUTO_AFTER_CALLS && !turn.isReported) {
+        try {
+          const flow = await read($, flowAtom)
+          if (flow === null || flow.isFinished) {
+            await update($, flowAtom, () => autoFlow(turn.prompt))
+            await update($, agentsAtom, list => list.filter(run => run.status === 'running'))
+          }
+        } catch {
+          // The band is a courtesy; never disturb the call.
+        }
+      }
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('command.run', { command: 'team' }, async ($, e) => {
     const isOpen = await togglePane($, e.args.trim() === 'open')
     return { text: isOpen ? 'Team panel opened.' : 'Team panel closed.' }
@@ -455,7 +504,8 @@ export const register: Register = on => {
     const input = e as unknown as Input
     const before = await read($, flowAtom)
     const next = mergeFlow(before, input)
-    const isFresh = before === null || before.title !== next.title || before.isFinished
+    const isFresh = before === null || before.title !== next.title || before.isFinished || before.isAuto === true
+    turn.isReported = true
     await rememberColors($, next.tasks.map(task => task.role))
 
     await update($, flowAtom, () => next)
@@ -573,6 +623,19 @@ export const register: Register = on => {
             costUsd: cost.costUsd,
           }
         })
+      } catch {
+        // Ignore: the turn must end regardless.
+      }
+    } else {
+      // A turn can start without a typed message, so the count restarts here too.
+      turn.calls = 0
+      turn.isReported = false
+      // A band the mod started itself ends with the turn.
+      try {
+        const flow = await read($, flowAtom)
+        if (flow?.isAuto && !flow.isFinished) {
+          await update($, flowAtom, f => (f ? { ...f, isFinished: true } : f))
+        }
       } catch {
         // Ignore: the turn must end regardless.
       }
