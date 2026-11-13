@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
-import { colorOf } from '../hooks/register'
+import { assignColor, colorOf } from '../hooks/register'
 
 const BAND = {
   plugin: 'team-progress',
@@ -94,12 +94,42 @@ test('a planned task can name any agent type', async ($, on) => {
   await ui.unmount()
 })
 
-test('every agent type gets a stable color, and known roles keep theirs', () => {
-  expect(colorOf('engineer')).toBe('#378ADD')
-  expect(colorOf('general-purpose')).toBe(colorOf('general-purpose'))
-  expect(colorOf('general-purpose')).not.toBe('#888780')
-  expect(colorOf('docs-writer')).not.toBe('#888780')
-  expect(colorOf('other')).toBe('#888780')
+test('built-in and team agent types have fixed, different colors', () => {
+  const fixed = ['engineer', 'senior-engineer', 'code-reviewer', 'qa-checker', 'design-advisor', 'fork', 'Explore', 'general-purpose', 'Plan', 'claude-code-guide', 'statusline-setup']
+  const colors = fixed.map(t => colorOf(t, {}))
+  expect(new Set(colors).size).toBe(fixed.length)
+  expect(colorOf('Plan', {})).not.toBe(colorOf('claude-code-guide', {}))
+  expect(colorOf('engineer', {})).toBe('#378ADD')
+})
+
+test('other agent types each get a color no one else has, and keep it', () => {
+  let given: Record<string, string> = {}
+  const types = Array.from({ length: 40 }, (_, i) => `custom-${i}`)
+  for (const t of types) given = assignColor(given, t)
+  const fixed = ['engineer', 'Plan', 'general-purpose', 'claude-code-guide', 'Explore'].map(t => colorOf(t, {}))
+  const custom = types.map(t => colorOf(t, given))
+  expect(new Set(custom).size).toBe(types.length)
+  expect(custom.some(c => fixed.includes(c))).toBe(false)
+  expect(assignColor(given, 'custom-3')).toBe(given)
+  expect(assignColor(given, 'Plan')).toBe(given)
+})
+
+test('a color given in an earlier session comes back and new ones are saved', async ($, on) => {
+  engine(on)
+  let saved: unknown
+  on('store.get', () => ({ value: { 'docs-writer': '#123456' } }))
+  on('store.set', (_, e) => {
+    saved = e.value
+    return { value: undefined }
+  })
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.subagentType }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.agent.spawn({ prompt: 'Write', description: 'Docs', subagentType: 'docs-writer' } as never)
+  await $.agent.spawn({ prompt: 'Test', description: 'Tests', subagentType: 'test-runner' } as never)
+  const map = saved as Record<string, string>
+  expect(map['docs-writer']).toBe('#123456')
+  expect(map['test-runner']).toBeDefined()
+  expect(map['test-runner']).not.toBe('#123456')
 })
 
 test('the band shows the lead task, tier and phase on every surface', async ($, on) => {

@@ -58,6 +58,8 @@ declare module 'claude-code' {
       lead: Shaped<Lead>
       panel: Shaped<Panel>
       now: number
+      /** Agent type -> color, for types without a fixed color; mirrored to $.store. */
+      colors: Shaped<Record<string, string>>
     }
   }
 }

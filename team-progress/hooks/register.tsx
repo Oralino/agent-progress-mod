@@ -36,6 +36,20 @@ const panelAtom = atom(
   { shape: 'panel-2' },
 )
 const nowAtom = atom({ plugin: 'team-progress', key: 'now' } as const, 0)
+const colorsAtom = atom({ plugin: 'team-progress', key: 'colors' } as const, {}, { shape: 'colors-1' })
+// The same map in $.store, so a type keeps its color across sessions.
+const COLORS_KEY = 'colors'
+
+const isColorMap = (v: unknown): v is Record<string, string> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every(c => typeof c === 'string')
+
+/** Gives each of `types` its color (if it has none yet) and saves the map for later sessions. */
+async function rememberColors($: EngineInterface, types: string[]) {
+  const before = await read($, colorsAtom)
+  if (types.every(t => !isAssignable(t) || before[t] !== undefined)) return
+  const after = await update($, colorsAtom, given => types.reduce(assignColor, given))
+  await $.store.set(COLORS_KEY, after).catch(() => undefined)
+}
 
 // ---------------------------------------------------------------- vocabulary
 
@@ -43,17 +57,26 @@ const ACCENT = '#8f8cf4'
 const GOOD = '#5fbf8f'
 const BAD = '#e5534b'
 
-const ROLE_COLORS: Record<string, string> = {
+// Colors that never change: common team roles and Claude Code's built-in agent types.
+// Every value is different, and no other agent type is ever given one of them.
+const FIXED_COLORS: Record<string, string> = {
   lead: '#8f8cf4',
   engineer: '#378ADD',
   'senior-engineer': '#D85A30',
   'code-reviewer': '#7F77DD',
   'qa-checker': '#1D9E75',
   'design-advisor': '#D4537E',
-  Explore: '#888780',
   fork: '#BA7517',
-  other: '#888780',
+  Explore: '#94A3B8',
+  'general-purpose': '#22D3EE',
+  Plan: '#EAB308',
+  'claude-code-guide': '#84CC16',
+  'statusline-setup': '#A0673A',
 }
+// A row whose agent type is not known yet.
+const UNKNOWN_COLOR = '#888780'
+// Handed out in order to any other agent type, the first time it is seen.
+const PALETTE = ['#EF4444', '#D946EF', '#A3A33A', '#F472B6', '#2DD4BF', '#FB923C', '#818CF8', '#65A30D']
 
 // Built-in lookup agents that answer in one pass: no step line in their brief.
 const QUICK_TYPES = ['Explore', 'Plan', 'claude-code-guide', 'statusline-setup']
@@ -90,23 +113,40 @@ const STEP_NOTE =
   'Then call it with done and a few-word note each time a step finishes. Always send it in the ' +
   'same message as your next other tool call, never on its own. If the tool is not available, skip this.'
 
-const isRole = (role: string) => Object.prototype.hasOwnProperty.call(ROLE_COLORS, role) && role !== 'other'
-// Any other agent type gets a stable color of its own, picked by its name.
-const PALETTE = ['#3A86FF', '#E07A5F', '#2A9D8F', '#C77DFF', '#E9A23B', '#43AA8B', '#F15BB5', '#5E81AC', '#D4A017', '#EF476F']
+const hasFixed = (type: string) => Object.prototype.hasOwnProperty.call(FIXED_COLORS, type)
+const isAssignable = (type: string) => type !== '' && type !== 'other' && !hasFixed(type)
 
-function hashOf(text: string): number {
-  let h = 2166136261
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i)
-    h = Math.imul(h, 16777619)
+function hslHex(hue: number, saturation: number, lightness: number): string {
+  const s = saturation / 100
+  const l = lightness / 100
+  const k = (n: number) => (n + hue / 30) % 12
+  const a = s * Math.min(l, 1 - l)
+  const channel = (n: number) => {
+    const v = l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))
+    return Math.round(v * 255).toString(16).padStart(2, '0')
   }
-  return h >>> 0
+  return `#${channel(0)}${channel(8)}${channel(4)}`.toUpperCase()
 }
 
-export function colorOf(role: string): string {
-  if (isRole(role)) return ROLE_COLORS[role] ?? '#888780'
-  if (role === '' || role === 'other') return ROLE_COLORS.other ?? '#888780'
-  return PALETTE[hashOf(role) % PALETTE.length] ?? '#888780'
+/** The color for an agent type: its fixed one, the one it was given, or grey while unknown. */
+export function colorOf(type: string, given: Record<string, string>): string {
+  return FIXED_COLORS[type] ?? given[type] ?? UNKNOWN_COLOR
+}
+
+/**
+ * Gives `type` a color no other type has, unless it already has one. Pure: returns
+ * the same map when nothing changes. The palette goes first; after that, colors are
+ * generated around the hue circle, skipping any already in use.
+ */
+export function assignColor(given: Record<string, string>, type: string): Record<string, string> {
+  if (!isAssignable(type) || given[type] !== undefined) return given
+  const used = new Set([...Object.values(FIXED_COLORS), UNKNOWN_COLOR, ...Object.values(given)].map(c => c.toUpperCase()))
+  let color = PALETTE.find(c => !used.has(c.toUpperCase()))
+  for (let i = 0; color === undefined; i++) {
+    const candidate = hslHex((i * 137.508 + 20) % 360, 70, 45 + (i % 3) * 10)
+    if (!used.has(candidate)) color = candidate
+  }
+  return { ...given, [type]: color }
 }
 const roleOfType = (type: string) => type.slice(type.lastIndexOf(':') + 1)
 
@@ -371,6 +411,14 @@ export const register: Register = on => {
 
     await $.command.register({ name: 'team', description: 'Show or hide the team panel of subagents' })
 
+    // Colors given in earlier sessions come back, so a type keeps its color.
+    try {
+      const saved = await $.store.get(COLORS_KEY)
+      if (isColorMap(saved)) await update($, colorsAtom, given => ({ ...saved, ...given }))
+    } catch {
+      // No saved colors: types get theirs as they appear.
+    }
+
     try {
       $.clock.every(1000, () => {
         void (async () => {
@@ -408,6 +456,7 @@ export const register: Register = on => {
     const before = await read($, flowAtom)
     const next = mergeFlow(before, input)
     const isFresh = before === null || before.title !== next.title || before.isFinished
+    await rememberColors($, next.tasks.map(task => task.role))
 
     await update($, flowAtom, () => next)
     if (isFresh) {
@@ -459,6 +508,7 @@ export const register: Register = on => {
           description: e.description,
           model: run.model || spawned.model,
         }))
+        await rememberColors($, [type])
         const at = await $.clock.now()
         await update($, nowAtom, () => at)
 
@@ -586,6 +636,7 @@ export const register: Register = on => {
     const lead = await read($, leadAtom)
     const panel = await read($, panelAtom)
     const now = await read($, nowAtom)
+    const colors = await read($, colorsAtom)
     const { Box, Text, Button } = $.ui.resolve(e)
 
     const running = runs.filter(run => run.status === 'running').reverse()
@@ -598,7 +649,7 @@ export const register: Register = on => {
     const columns = e.props.bodyColumns
 
     const agentRow = (run: AgentRun) => {
-      const roleColor = colorOf(roleOfType(run.type))
+      const roleColor = colorOf(roleOfType(run.type), colors)
       const glyph = run.status === 'running' ? '●' : run.status === 'done' ? '✓' : '✗'
       const glyphColor = run.status === 'running' ? roleColor : run.status === 'done' ? GOOD : BAD
       const width = Math.max(8, Math.min(16, Math.round(columns / 4)))
@@ -659,7 +710,7 @@ export const register: Register = on => {
         {planned.length > 0 && <Text dimColor>{`Planned · ${planned.length}`}</Text>}
         {planned.map((task, index) => (
           <Text>
-            <Text color={colorOf(task.role)}>◷</Text>
+            <Text color={colorOf(task.role, colors)}>◷</Text>
             {` ${index + 1}. ${task.title} · ${task.role}`}
           </Text>
         ))}

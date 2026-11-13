@@ -20,7 +20,9 @@ config files to edit.
   starts. The panel opens by itself once per task, when work is first delegated.
 
 Works with any agents: the built-in `general-purpose` agent, your own agents in `~/.claude/agents/`, or
-a plugin's. Each agent type gets its own color automatically, the same one every time. Quick lookup agents (`Explore`, `Plan`) are tracked but not asked to report steps.
+a plugin's. Each agent type gets its own color, never shared with another type, and keeps it
+across runs and sessions. Claude Code's built-in types have fixed colors; any other type is given an
+unused color the first time it appears. Quick lookup agents (`Explore`, `Plan`) are tracked but not asked to report steps.
 
 ## Install
 
