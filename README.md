@@ -24,6 +24,8 @@ a plugin's. Each agent type gets its own color, never shared with another type, 
 across runs and sessions. Claude Code's built-in types have fixed colors; any other type is given an
 unused color the first time it appears. Quick lookup agents (`Explore`, `Plan`) are tracked but not asked to report steps.
 
+![Team panel: Plan keeps the same yellow on two runs, while general-purpose and claude-code-guide each have their own color](docs/panel-colors.png)
+
 ## Install
 
 In a Claude Code session:
