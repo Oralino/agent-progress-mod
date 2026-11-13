@@ -2,3 +2,6 @@
 team-progress/.claude-plugin/types/
 team-progress/tsconfig.json
 node_modules/
+
+# Handoff notes stay local
+brain/work/HANDOFF.md
