@@ -1,0 +1,12 @@
+{
+  "name": "agent-progress-mod",
+  "owner": { "name": "Oralino" },
+  "metadata": { "description": "Progress band and team panel mod for Claude Code agent workflows." },
+  "plugins": [
+    {
+      "name": "team-progress",
+      "source": "./team-progress",
+      "description": "Progress band and /team panel for the lead-and-agents engineering workflow."
+    }
+  ]
+}
